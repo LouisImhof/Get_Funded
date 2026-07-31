@@ -1,0 +1,1110 @@
+<meta charset="utf-8">
+<title>PATTERN ARCADE — sim terminal</title>
+<style>
+  :root {
+    --bg: #05100b;
+    --panel: #0a1a13;
+    --panel2: #0d2118;
+    --border: #1c3a2c;
+    --text: #dff5e8;
+    --muted: #6b8f7c;
+    --phosphor: #39ff88;
+    --up: #1fae5e;
+    --down: #b8351f;
+    --down-text: #ff6b4a;
+    --gold: #e0ab1f;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; background: var(--bg); color: var(--text);
+    font-family: ui-monospace, "Cascadia Code", "Cascadia Mono", "SF Mono", Consolas, "Liberation Mono", monospace;
+    font-size: 14px;
+    -webkit-font-smoothing: antialiased;
+  }
+  body { position: relative; min-height: 100vh; overflow-x: hidden; }
+  body.pre-game #run-bar, body.pre-game #ticker-bar, body.pre-game .order-ticket, body.pre-game .position-readout { visibility: hidden; }
+
+  body::before {
+    content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 50;
+    background: repeating-linear-gradient(to bottom, rgba(0,0,0,0) 0px, rgba(0,0,0,0) 2px, rgba(0,0,0,0.10) 3px);
+    mix-blend-mode: multiply;
+  }
+  body::after {
+    content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 51;
+    background: radial-gradient(ellipse at center, rgba(0,0,0,0) 55%, rgba(0,0,0,0.55) 100%);
+  }
+
+  .notch { clip-path: polygon(0 10px, 10px 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 0 100%); }
+  .notch-sm { clip-path: polygon(0 6px, 6px 0, calc(100% - 6px) 0, 100% 6px, 100% 100%, 0 100%); }
+
+  header {
+    padding: 14px 22px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 8px;
+  }
+  h1 {
+    margin: 0; font-size: 20px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase;
+    color: var(--phosphor); text-shadow: 0 0 6px rgba(57,255,136,0.55), 0 0 18px rgba(57,255,136,0.25);
+  }
+  h1 span { color: var(--muted); font-weight: 400; text-shadow: none; letter-spacing: 1px; font-size: 12px; margin-left: 10px; }
+  .cursor { display: inline-block; width: 9px; background: var(--phosphor); margin-left: 6px; animation: blink 1s steps(1) infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+  @media (prefers-reduced-motion: reduce) { .cursor { animation: none; } }
+  #build-tag { color: var(--muted); font-size: 11px; letter-spacing: 1px; }
+
+  main { display: grid; grid-template-columns: 1fr 320px; gap: 16px; padding: 16px 22px 28px; max-width: 1280px; margin: 0 auto; }
+  @media (max-width: 880px) { main { grid-template-columns: 1fr; } }
+
+  .panel { background: var(--panel); border: 1px solid var(--border); position: relative; }
+  .panel-title {
+    padding: 8px 14px; border-bottom: 1px solid var(--border);
+    font-size: 11px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--muted);
+    display: flex; justify-content: space-between; align-items: center;
+  }
+
+  #run-bar { padding: 10px 14px; border-bottom: 1px solid var(--border); }
+  #run-bar .row1 { display: flex; justify-content: space-between; align-items: baseline; font-size: 12px; }
+  #run-bar b { color: var(--phosphor); }
+  #run-bar .day-dots { display: inline-flex; gap: 4px; margin-left: 8px; vertical-align: middle; }
+  #run-bar .day-dot { width: 7px; height: 7px; border: 1px solid var(--border); display: inline-block; }
+  #run-bar .day-dot.filled { background: var(--phosphor); border-color: var(--phosphor); }
+  #run-bar .day-dot.current { border-color: var(--gold); }
+  #quota-track { height: 10px; background: var(--panel2); border: 1px solid var(--border); position: relative; margin-top: 6px; overflow: hidden; }
+  #quota-fill { height: 100%; background: var(--up); width: 0%; }
+  #quota-fill.over { background: var(--gold); }
+  #quota-label { font-size: 10.5px; color: var(--muted); margin-top: 4px; display: flex; justify-content: space-between; }
+
+  #ticker-bar {
+    display: flex; align-items: center; gap: 14px; padding: 10px 14px; border-bottom: 1px solid var(--border);
+    font-size: 13px; overflow-x: auto; white-space: nowrap;
+  }
+  #ticker-bar b { color: var(--phosphor); }
+  .regime-tag { padding: 1px 8px; border: 1px solid var(--border); color: var(--muted); font-size: 10.5px; letter-spacing: 1px; text-transform: uppercase; }
+  .price-now { font-weight: 700; font-variant-numeric: tabular-nums; }
+  .price-now.up { color: var(--up); }
+  .price-now.down { color: var(--down-text); }
+  .lev-tag { padding: 1px 8px; border: 1px solid var(--gold); color: var(--gold); font-size: 10.5px; letter-spacing: 1px; }
+
+  #chart-wrap { position: relative; padding: 8px; }
+  #chart { display: block; width: 100%; height: 340px; }
+  #chart-tooltip {
+    position: absolute; pointer-events: none; background: var(--panel2); border: 1px solid var(--border);
+    padding: 6px 9px; font-size: 11.5px; line-height: 1.5; display: none; white-space: nowrap; font-variant-numeric: tabular-nums;
+  }
+
+  .order-ticket { padding: 14px; border-top: 1px solid var(--border); }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .row + .row { margin-top: 10px; }
+  .chip {
+    background: var(--panel2); border: 1px solid var(--border); color: var(--text);
+    padding: 5px 12px; font-size: 12px; cursor: pointer; font-family: inherit; letter-spacing: 0.5px;
+  }
+  .chip.active { border-color: var(--phosphor); color: var(--phosphor); }
+  .chip:disabled { opacity: 0.35; cursor: not-allowed; }
+  .btn {
+    font-family: inherit; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase;
+    padding: 12px 18px; border: none; cursor: pointer; font-size: 13px; flex: 1;
+  }
+  .btn:disabled { opacity: 0.3; cursor: not-allowed; }
+  .btn-long { background: var(--up); color: #04180d; }
+  .btn-short { background: var(--down-text); color: #260a03; }
+  .btn-close { background: var(--panel2); color: var(--text); border: 1px solid var(--border); flex: 0 0 auto; padding: 12px 16px; }
+
+  .position-readout { padding: 10px 14px; border-top: 1px solid var(--border); font-size: 12.5px; }
+  .position-readout .none { color: var(--muted); }
+  .pnl-line { font-variant-numeric: tabular-nums; font-weight: 700; margin-top: 4px; }
+  .pnl-line.pos { color: var(--up); }
+  .pnl-line.neg { color: var(--down-text); }
+
+  aside { display: flex; flex-direction: column; gap: 16px; }
+  .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--border); }
+  .stat-cell { background: var(--panel); padding: 10px 12px; }
+  .stat-cell .label { font-size: 10px; letter-spacing: 1px; text-transform: uppercase; color: var(--muted); }
+  .stat-cell .value { font-size: 17px; font-weight: 700; font-variant-numeric: tabular-nums; margin-top: 2px; }
+  .stat-cell .value.gold { color: var(--gold); }
+
+  .relic-list { display: flex; flex-direction: column; gap: 1px; background: var(--border); }
+  .relic-item { background: var(--panel); padding: 9px 12px; }
+  .relic-item .name { font-weight: 700; font-size: 12px; color: var(--phosphor); }
+  .relic-item .desc { color: var(--muted); font-size: 11px; margin-top: 2px; line-height: 1.4; }
+  .empty-note { color: var(--muted); font-size: 11.5px; padding: 12px; text-align: center; }
+
+  .meta-row { display: flex; justify-content: space-between; align-items: center; padding: 9px 12px; border-bottom: 1px solid var(--border); gap: 8px; }
+  .meta-row:last-child { border-bottom: none; }
+  .meta-row .name { font-size: 12px; font-weight: 700; }
+  .meta-row .desc { font-size: 10.5px; color: var(--muted); margin-top: 2px; }
+  .buy-btn {
+    font-family: inherit; background: var(--panel2); border: 1px solid var(--gold); color: var(--gold);
+    padding: 5px 10px; font-size: 11px; cursor: pointer; letter-spacing: 0.5px; font-weight: 700; white-space: nowrap; flex-shrink: 0;
+  }
+  .buy-btn:disabled { opacity: 0.3; cursor: not-allowed; border-color: var(--border); color: var(--muted); }
+
+  #toast-stack {
+    position: fixed; top: 14px; left: 50%; transform: translateX(-50%); z-index: 60;
+    display: flex; flex-direction: column; gap: 6px; align-items: center; pointer-events: none;
+  }
+  .toast {
+    background: var(--panel2); border: 1px solid var(--phosphor); color: var(--phosphor);
+    padding: 8px 16px; font-size: 12.5px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase;
+    box-shadow: 0 0 12px rgba(57,255,136,0.3); animation: toast-in 220ms ease-out;
+  }
+  .toast.bad { border-color: var(--down-text); color: var(--down-text); box-shadow: 0 0 12px rgba(255,107,74,0.3); }
+  .toast.gold { border-color: var(--gold); color: var(--gold); box-shadow: 0 0 12px rgba(224,171,31,0.3); }
+  @keyframes toast-in { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: translateY(0); } }
+  @media (prefers-reduced-motion: reduce) { .toast { animation: none; } }
+
+  .footnote { color: var(--muted); font-size: 10.5px; text-align: center; padding: 6px 14px 2px; letter-spacing: 0.5px; }
+  #legend { display: flex; gap: 14px; padding: 6px 14px; font-size: 10.5px; color: var(--muted); letter-spacing: 0.5px; }
+  #legend span { display: inline-flex; align-items: center; gap: 5px; }
+  #legend i { width: 8px; height: 8px; display: inline-block; }
+  #legend .up-sw { background: var(--up); }
+  #legend .down-sw { background: var(--down); }
+
+  .overlay {
+    position: absolute; inset: 0; z-index: 20; background: rgba(5,16,11,0.92);
+    display: none; flex-direction: column; align-items: center; justify-content: center; padding: 24px; text-align: center;
+    border: 1px solid var(--phosphor);
+  }
+  .overlay.show { display: flex; }
+  .overlay h2 { color: var(--phosphor); letter-spacing: 2px; text-transform: uppercase; margin: 0 0 6px; font-size: 18px; text-shadow: 0 0 8px rgba(57,255,136,0.5); }
+  .overlay .sub { color: var(--muted); font-size: 12px; margin-bottom: 18px; }
+  .relic-cards { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; max-width: 640px; }
+  .relic-card {
+    background: var(--panel2); border: 1px solid var(--border); padding: 14px; width: 175px; text-align: left; cursor: pointer;
+  }
+  .relic-card:hover { border-color: var(--gold); }
+  .relic-card .name { color: var(--gold); font-weight: 700; font-size: 12.5px; }
+  .relic-card .desc { color: var(--muted); font-size: 11px; margin-top: 6px; line-height: 1.45; }
+  .skip-link { margin-top: 16px; color: var(--muted); font-size: 11.5px; text-decoration: underline; cursor: pointer; background: none; border: none; font-family: inherit; }
+  .bust-stats { display: flex; gap: 20px; margin: 14px 0; }
+  .bust-stats div { text-align: center; }
+  .bust-stats .v { font-size: 22px; font-weight: 700; color: var(--phosphor); }
+  .bust-stats .l { font-size: 10.5px; color: var(--muted); letter-spacing: 1px; text-transform: uppercase; }
+</style>
+
+<div id="toast-stack"></div>
+
+<header>
+  <h1>Pattern Arcade <span>sim terminal — no real funds<span class="cursor">&nbsp;</span></span></h1>
+  <div id="build-tag">PAPER MODE // RNG-DRIVEN</div>
+</header>
+
+<main>
+  <div>
+    <div class="panel notch">
+      <div id="run-bar">
+        <div class="row1">
+          <span>LEVEL <b id="level-num">1</b> <span class="day-dots" id="day-dots"></span> <span class="regime-tag" id="desk-rank">Rookie Desk</span> <span class="regime-tag" id="modifier-tag" style="display:none; border-color:var(--down-text); color:var(--down-text);"></span></span>
+          <span id="ticks-left">40 ticks left</span>
+        </div>
+        <div id="quota-track"><div id="quota-fill"></div></div>
+        <div id="quota-label"><span id="profit-progress">+$0 / +$0 profit</span><span id="quota-pct">0%</span></div>
+        <div id="mission-line" style="font-size:10.5px; margin-top:4px; letter-spacing:0.5px;"></div>
+      </div>
+      <div id="ticker-bar">
+        <b id="ticker-symbol">----/USD</b>
+        <span class="regime-tag" id="regime-tag">chop</span>
+        <span class="price-now" id="price-now">0.00</span>
+        <span id="price-change"></span>
+        <span class="lev-tag" id="lev-cap-tag">max 2x</span>
+      </div>
+      <div id="chart-wrap">
+        <canvas id="chart"></canvas>
+        <div id="chart-tooltip"></div>
+
+        <div class="overlay show" id="start-overlay">
+          <h2>Pattern Arcade</h2>
+          <div class="sub" id="briefing-text">Loading briefing&hellip;</div>
+          <button class="btn" id="btn-start-game" style="background:var(--phosphor); color:#04180d; flex:0 0 auto; padding:12px 28px;">Start Game</button>
+          <div class="sub" style="margin-top:14px; margin-bottom:0;">Spend Insight on meta upgrades any time — they carry into every future run.</div>
+        </div>
+
+        <div class="overlay" id="shop-overlay">
+          <h2>Level Cleared</h2>
+          <div class="sub">Pick one relic to carry into level <span id="shop-next-round">2</span>.</div>
+          <div class="relic-cards" id="relic-cards"></div>
+          <div style="display:flex; gap:18px; align-items:center;">
+            <button class="skip-link" id="reroll-relics">Reroll offers (-5% cash)</button>
+            <button class="skip-link" id="skip-relic">Skip for a small cash bonus</button>
+          </div>
+        </div>
+
+        <div class="overlay" id="briefing-overlay">
+          <h2 id="briefing-level-title">Level 1</h2>
+          <div class="sub" id="briefing-rank">Rookie Desk</div>
+          <div style="font-size:14px; margin-bottom:14px;">Target: <b id="briefing-target" style="color:var(--phosphor);">+$250 (+25%)</b> in <span id="briefing-days">3</span> trading days</div>
+          <div id="briefing-modifier" style="display:none; border:1px solid var(--down-text); padding:10px 14px; max-width:420px; margin-bottom:12px;">
+            <div style="color:var(--down-text); font-weight:700; font-size:12.5px; letter-spacing:1px; text-transform:uppercase;" id="briefing-modifier-name">⚠ Modifier</div>
+            <div style="color:var(--muted); font-size:11.5px; margin-top:4px;" id="briefing-modifier-desc"></div>
+          </div>
+          <div style="border:1px solid var(--gold); padding:10px 14px; max-width:420px; margin-bottom:16px;">
+            <div style="color:var(--gold); font-weight:700; font-size:12.5px; letter-spacing:1px; text-transform:uppercase;">◇ Mission (+10% cash)</div>
+            <div style="color:var(--muted); font-size:11.5px; margin-top:4px;" id="briefing-mission-desc"></div>
+          </div>
+          <button class="btn" id="btn-begin-level" style="background:var(--phosphor); color:#04180d; flex:0 0 auto; padding:12px 28px;">Begin Trading</button>
+        </div>
+
+        <div class="overlay" id="bust-overlay">
+          <h2>Run Over</h2>
+          <div class="sub" id="bust-reason">Missed the profit target.</div>
+          <div class="bust-stats">
+            <div><div class="v" id="bust-rounds">0</div><div class="l">Levels cleared</div></div>
+            <div><div class="v" id="bust-peak">$0</div><div class="l">Peak cash</div></div>
+            <div><div class="v" id="bust-insight">+0</div><div class="l">Insight earned</div></div>
+          </div>
+          <button class="btn" id="btn-new-run" style="background:var(--phosphor); color:#04180d; flex:0 0 auto; padding:12px 24px;">Start New Run</button>
+        </div>
+      </div>
+      <div id="legend">
+        <span><i class="up-sw"></i> price up</span>
+        <span><i class="down-sw"></i> price down</span>
+        <span id="entry-legend" style="display:none;">┈┈ your entry</span>
+        <span id="liq-legend" style="display:none;">···· liquidation</span>
+      </div>
+
+      <div class="order-ticket">
+        <div class="row">
+          <span style="color:var(--muted); font-size:11px; letter-spacing:1px; text-transform:uppercase;">Size</span>
+          <button class="chip" data-size="0.25">25%</button>
+          <button class="chip active" data-size="0.5">50%</button>
+          <button class="chip" data-size="1">100%</button>
+          <span style="width:14px;"></span>
+          <span style="color:var(--muted); font-size:11px; letter-spacing:1px; text-transform:uppercase;">Leverage</span>
+          <button class="chip active" data-lev="1">1x</button>
+          <button class="chip" data-lev="2">2x</button>
+          <button class="chip" data-lev="5" disabled>5x</button>
+          <button class="chip" data-lev="10" disabled>10x</button>
+        </div>
+        <div class="row">
+          <button class="btn btn-long" id="btn-long" disabled>Long</button>
+          <button class="btn btn-short" id="btn-short" disabled>Short</button>
+          <button class="btn btn-close" id="btn-close" disabled>Close</button>
+          <button class="btn btn-close" id="btn-end-day" disabled title="Available once the profit target is reached, or after a liquidation">End Day ▸</button>
+        </div>
+      </div>
+
+      <div class="position-readout" id="position-readout"><span class="none">No open position.</span></div>
+    </div>
+    <div class="footnote">Synthetic random-walk market. Nothing here is real price data, investment advice, or real money.</div>
+  </div>
+
+  <aside>
+    <div class="panel notch-sm">
+      <div class="panel-title">This run</div>
+      <div class="stat-grid">
+        <div class="stat-cell"><div class="label">Cash</div><div class="value" id="stat-cash">$0</div></div>
+        <div class="stat-cell"><div class="label">Best run (levels)</div><div class="value gold" id="stat-best-round">0</div></div>
+      </div>
+    </div>
+
+    <div class="panel notch-sm">
+      <div class="panel-title">Active relics</div>
+      <div class="relic-list" id="relic-list"><div class="empty-note">No relics yet — clear level 1 to pick one.</div></div>
+    </div>
+
+    <div class="panel notch-sm">
+      <div class="panel-title">Meta upgrades <span id="insight-balance" style="color:var(--gold);">0 insight</span></div>
+      <div id="meta-list"></div>
+    </div>
+  </aside>
+</main>
+
+<script>
+(() => {
+  "use strict";
+
+  // ================= persistence (meta-progression only survives here) =================
+  const SAVE_KEY = "patternArcadeSave_v3";
+  const DEFAULT_SAVE = {
+    insight: 0,
+    bestLevelReached: 0,
+    metaUpgrades: { headStart: 0, extraCash: 0, warmStart: 0 },
+  };
+  function loadSave() {
+    try {
+      const raw = localStorage.getItem(SAVE_KEY);
+      if (!raw) return structuredClone(DEFAULT_SAVE);
+      const parsed = JSON.parse(raw);
+      return { ...structuredClone(DEFAULT_SAVE), ...parsed, metaUpgrades: { ...DEFAULT_SAVE.metaUpgrades, ...(parsed.metaUpgrades || {}) } };
+    } catch (e) { return structuredClone(DEFAULT_SAVE); }
+  }
+  function persistMeta() { localStorage.setItem(SAVE_KEY, JSON.stringify(meta)); }
+  let meta = loadSave();
+
+  // ================= relic definitions =================
+  const RELICS = [
+    { id: "momentum", name: "Momentum Core", desc: "Each consecutive winning close stacks +5% profit on the next win (resets on a loss)." },
+    { id: "diamond", name: "Diamond Hands", desc: "Wins held 10+ ticks before closing get +25% profit." },
+    { id: "contrarian", name: "Contrarian Streak", desc: "Profitable shorts in an uptrend (or longs in a downtrend) pay +50%." },
+    { id: "shock", name: "Shock Absorber", desc: "Liquidations this run only cost 60% of margin, not 100%." },
+    { id: "quickdraw", name: "Quick Draw", desc: "Every trade's margin requirement is 20% cheaper." },
+    { id: "compound", name: "Compound Interest", desc: "Clearing a level pays an extra 3% of your cash." },
+    { id: "highroller", name: "High Roller", desc: "Leverage cap raised one tier early — but liquidations cost 120% of margin." },
+    { id: "coinflip", name: "Coin Flip Charm", desc: "Profitable closes: 30% chance to double the profit, 10% chance to zero it." },
+    { id: "scalper", name: "Scalper's Ring", desc: "Wins held 5 ticks or less pay +30%." },
+    { id: "daybreak", name: "Daybreak Engine", desc: "Wins closed on day 1 pay +25%." },
+    { id: "nightowl", name: "Night Owl", desc: "Wins closed on the final day pay +40%." },
+    { id: "voljunkie", name: "Volatility Junkie", desc: "Wins opened during a volatile regime pay +40%." },
+    { id: "insurance", name: "Insurance Policy", desc: "First liquidation each level only costs 30% of margin." },
+    { id: "interest", name: "Savings Account", desc: "Every End Day skip pays 2% interest on your cash." },
+  ];
+  const relicById = id => RELICS.find(r => r.id === id);
+
+  // Boss-market modifiers (Balatro boss blinds): every 3rd level draws one,
+  // announced in the level briefing so the player can plan around it.
+  const MODIFIERS = [
+    { id: "fog", name: "Fog of War", desc: "The regime tag is hidden — read the chart yourself." },
+    { id: "whipsaw", name: "Whipsaw", desc: "The market flips regimes far more often." },
+    { id: "spread", name: "Wide Spread", desc: "Every trade charges a 2% fee on margin at open." },
+    { id: "margincall", name: "Margin Call", desc: "Liquidation triggers already at 80% margin loss." },
+    { id: "gravity", name: "Heavy Gravity", desc: "Profit target is 10 percentage points higher." },
+    { id: "sprint", name: "Sprint Session", desc: "Only 2 trading days this level." },
+  ];
+
+  // One optional side mission per level; completing it pays +10% of the
+  // level's starting cash on level end — applied BEFORE the quota check, so
+  // a finished mission can rescue an otherwise-missed target.
+  const MISSIONS = [
+    { id: "streak3", name: "Hot Hand", desc: "Close 3 winning trades in a row" },
+    { id: "shortwin", name: "Bear Hunter", desc: "Close a profitable SHORT" },
+    { id: "longwin", name: "Bull Rider", desc: "Close a profitable LONG" },
+    { id: "hold15", name: "Diamond Patience", desc: "Close a win held 15+ ticks" },
+    { id: "quick5", name: "Scalper Run", desc: "Close a win held 5 ticks or less" },
+    { id: "day1", name: "Early Bird", desc: "Reach the profit target on day 1" },
+  ];
+
+  const META_ITEMS = [
+    { id: "headStart", name: "Head Start", maxTier: 3, cost: t => [15, 35, 70][t], desc: t => `+$100 starting cash each run (total +$${(t+1)*100}).` },
+    { id: "warmStart", name: "Warm Start", maxTier: 1, cost: () => 25, desc: () => "Level 1 profit target lowered from 25% to 15%." },
+    { id: "extraCash", name: "Nest Egg", maxTier: 3, cost: t => [20, 45, 90][t], desc: t => `+$50 to every level's carried cash on clear (total +$${(t+1)*50}).` },
+  ];
+
+  // ================= level / day / leverage structure =================
+  const TICKS_PER_DAY = 60;
+  const DAYS_PER_LEVEL = 3;
+  const TICKS_PER_LEVEL = TICKS_PER_DAY * DAYS_PER_LEVEL;
+  const LEV_CAPS = [1, 2, 5, 10];        // every selectable leverage chip
+  const LEV_TIERS = [2, 5, 10];          // level-gated caps (you always have at least 2x)
+
+  function levelLeverageCap(level) {
+    if (level <= 2) return LEV_TIERS[0];
+    if (level <= 4) return LEV_TIERS[1];
+    return LEV_TIERS[2];
+  }
+  function levCap() {
+    const base = levelLeverageCap(run.level);
+    if (!run.relics.includes("highroller")) return base;
+    const idx = LEV_TIERS.indexOf(base);
+    return LEV_TIERS[Math.min(LEV_TIERS.length - 1, idx + 1)];
+  }
+
+  const DESK_RANKS = [
+    { min: 1, name: "Rookie Desk" },
+    { min: 3, name: "Senior Desk" },
+    { min: 5, name: "Prop Desk" },
+    { min: 7, name: "Whale Desk" },
+    { min: 10, name: "Legend Desk" },
+  ];
+  function deskRankForLevel(level) {
+    let name = DESK_RANKS[0].name;
+    for (const r of DESK_RANKS) if (level >= r.min) name = r.name;
+    return name;
+  }
+
+  // Higher levels run a slightly hotter market — a real prop desk gets
+  // riskier as the stakes go up, not just numerically harder targets.
+  // Capped so it never runs away at very high levels.
+  function volMultiplierForLevel(level) {
+    return Math.min(1.6, 1 + (level - 1) * 0.03);
+  }
+
+  function baseStartingCash() {
+    return 1000 + meta.metaUpgrades.headStart * 100;
+  }
+  function profitPctForLevel(level) {
+    if (level === 1) return meta.metaUpgrades.warmStart > 0 ? 0.15 : 0.25;
+    return 0.35;
+  }
+
+  // ================= run state =================
+  let run;
+
+  function startLevel(level, startCash) {
+    const prevCap = level > 1 ? levelLeverageCap(level - 1) : null;
+    const newCap = levelLeverageCap(level);
+
+    run.level = level;
+    run.levelStartCash = startCash;
+    run.modifier = (level >= 3 && level % 3 === 0)
+      ? MODIFIERS[Math.floor(Math.random() * MODIFIERS.length)] : null;
+    run.mission = { ...MISSIONS[Math.floor(Math.random() * MISSIONS.length)], done: false };
+    run.daysThisLevel = (run.modifier && run.modifier.id === "sprint") ? 2 : DAYS_PER_LEVEL;
+    run.ticksThisLevel = run.daysThisLevel * TICKS_PER_DAY;
+    run.profitTargetPct = profitPctForLevel(level)
+      + ((run.modifier && run.modifier.id === "gravity") ? 0.10 : 0);
+    run.quota = Math.round(startCash * (1 + run.profitTargetPct));
+    run.tickInLevel = 0;
+    run.streak = 0;
+    run.liquidatedThisDay = false;
+    run.usedInsurance = false;
+    run.phase = "briefing";
+    seedMarket();
+    openLevelBriefing();
+
+    if (level > 1 && newCap > prevCap) toast(`${newCap}X LEVERAGE UNLOCKED`, "gold");
+    const rank = deskRankForLevel(level);
+    if (level === 1 || deskRankForLevel(level - 1) !== rank) toast(`WELCOME TO THE ${rank.toUpperCase()}`, "gold");
+  }
+
+  function newRun() {
+    const startCash = baseStartingCash();
+    run = {
+      level: 1,
+      cash: startCash,
+      levelStartCash: startCash,
+      profitTargetPct: 0,
+      quota: 0,
+      tickInLevel: 0,
+      relics: [],
+      streak: 0,
+      peakCash: startCash,
+      position: null,
+      phase: "trading",
+    };
+    startLevel(1, startCash);
+    render();
+  }
+
+  // ================= market generation =================
+  const TICKER_ROOTS = ["ZOLT","QUIB","FRAX","GLIM","VORP","NULL","PIXL","DRIP","YEET","ECHO","RUNE","VYBE","BLIP","SNAG","OOZE","CRUD"];
+  const TICKER_SUFFIX = ["/USD","-9","/SIM",""];
+  const REGIMES = [
+    { name: "uptrend", drift: 0.0022, vol: 0.010 },
+    { name: "downtrend", drift: -0.0022, vol: 0.010 },
+    { name: "chop", drift: 0.0, vol: 0.007 },
+    { name: "volatile", drift: 0.0, vol: 0.022 },
+  ];
+  let ticker = "----/USD";
+  let candles = [];
+  let regime = REGIMES[2];
+  let regimePlan = [];
+
+  function randTicker() {
+    const root = TICKER_ROOTS[Math.floor(Math.random() * TICKER_ROOTS.length)];
+    const suf = TICKER_SUFFIX[Math.floor(Math.random() * TICKER_SUFFIX.length)];
+    return root + suf;
+  }
+  function gauss() {
+    let u = 0, v = 0;
+    while (u === 0) u = Math.random();
+    while (v === 0) v = Math.random();
+    return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+  }
+
+  // Every level guarantees at least one clear uptrend segment and one clear
+  // downtrend segment lasting a real chunk of the level (not just a lucky
+  // roll of the dice), so the profit target is always realistically
+  // reachable by trading the direction correctly — not gated on getting a
+  // favorable regime by chance.
+  function buildRegimePlan() {
+    const total = run ? run.ticksThisLevel : TICKS_PER_LEVEL;
+    const whipsaw = !!(run && run.modifier && run.modifier.id === "whipsaw");
+    const segments = [REGIMES[0], REGIMES[1]]; // guaranteed uptrend + downtrend
+    const extraCount = (whipsaw ? 6 : 2) + Math.floor(Math.random() * 2);
+    for (let i = 0; i < extraCount; i++) segments.push(REGIMES[Math.floor(Math.random() * REGIMES.length)]);
+    for (let i = segments.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [segments[i], segments[j]] = [segments[j], segments[i]];
+    }
+    const n = segments.length;
+    const base = Math.floor(total / n);
+    let cum = 0;
+    const plan = segments.map((r, i) => {
+      const len = i === n - 1 ? total - cum : base + Math.floor((Math.random() - 0.5) * base * 0.4);
+      cum += len;
+      return { regime: r, endTick: cum };
+    });
+    return plan;
+  }
+  function regimeForTick(t) {
+    for (const seg of regimePlan) if (t < seg.endTick) return seg.regime;
+    return regimePlan[regimePlan.length - 1].regime;
+  }
+
+  function seedMarket() {
+    ticker = randTicker();
+    candles = [];
+    let price = 50 + Math.random() * 150;
+    regimePlan = buildRegimePlan();
+    regime = regimeForTick(0);
+    for (let i = 0; i < 50; i++) { candles.push(makeCandle(price)); price = candles[candles.length - 1].c; }
+  }
+  function makeCandle(openPrice) {
+    let price = openPrice, high = price, low = price;
+    const steps = 5;
+    const volMult = run ? volMultiplierForLevel(run.level) : 1;
+    for (let s = 0; s < steps; s++) {
+      const drift = regime.drift / steps;
+      const noise = gauss() * (regime.vol * volMult) / Math.sqrt(steps);
+      price = Math.max(0.01, price * (1 + drift + noise));
+      high = Math.max(high, price); low = Math.min(low, price);
+    }
+    return { o: openPrice, h: high, l: low, c: price };
+  }
+
+  function tick() {
+    if (!run || run.phase !== "trading") return;
+    regime = regimeForTick(run.tickInLevel);
+    const prevClose = candles[candles.length - 1].c;
+    candles.push(makeCandle(prevClose));
+    if (candles.length > 200) candles.shift();
+    checkLiquidation();
+    checkMissionTick();
+    if (run.phase === "trading") {
+      run.tickInLevel++;
+      if (run.tickInLevel >= run.ticksThisLevel) endLevel();
+      else if (run.tickInLevel % TICKS_PER_DAY === 0) run.liquidatedThisDay = false;
+    }
+    render();
+  }
+
+  function completeMission() {
+    if (!run.mission || run.mission.done) return;
+    run.mission.done = true;
+    toast(`MISSION COMPLETE: ${run.mission.name.toUpperCase()}`, "gold");
+  }
+  function checkMissionTick() {
+    const m = run.mission;
+    if (!m || m.done) return;
+    if (m.id === "day1" && run.tickInLevel < TICKS_PER_DAY && totalEquity() >= run.quota) completeMission();
+  }
+
+  // "End day" — once the profit target is hit (or you got liquidated and
+  // just want the day over), the player can skip the remaining ticks of the
+  // current trading day instead of waiting out the clock. On the last day
+  // this ends the level, triggering the normal clear/bust evaluation.
+  function canEndDay() {
+    if (!run || run.phase !== "trading" || run.position) return false;
+    return totalEquity() >= run.quota || run.liquidatedThisDay || run.cash < 1;
+  }
+  function endDay() {
+    if (!canEndDay()) return;
+    const boundary = (Math.floor(run.tickInLevel / TICKS_PER_DAY) + 1) * TICKS_PER_DAY;
+    run.tickInLevel = Math.min(boundary, run.ticksThisLevel);
+    run.liquidatedThisDay = false;
+    if (run.relics.includes("interest")) {
+      const pay = round2(run.cash * 0.02);
+      run.cash = round2(run.cash + pay);
+      run.peakCash = Math.max(run.peakCash, run.cash);
+      toast(`SAVINGS INTEREST +$${pay.toFixed(2)}`, "gold");
+    }
+    if (run.tickInLevel >= run.ticksThisLevel) {
+      endLevel();
+    } else {
+      toast("DAY ENDED", "gold");
+    }
+    render();
+  }
+
+  // ================= trading =================
+  function currentPrice() { return candles[candles.length - 1].c; }
+  let selectedSizePct = 0.5;
+  let selectedLeverage = 1;
+
+  function openPosition(side) {
+    if (!run || run.phase !== "trading" || run.position) return;
+    let margin = round2(run.cash * selectedSizePct);
+    if (run.relics.includes("quickdraw")) margin = round2(margin * 0.8);
+    // Floor-clamp to whole cents so float dust in run.cash can never make
+    // the rounded margin exceed available cash (which silently blocked the
+    // trade — most visibly at 100% size right after closing a position).
+    margin = Math.min(margin, Math.floor(run.cash * 100) / 100);
+    let fee = 0;
+    if (run.modifier && run.modifier.id === "spread") {
+      // Scale margin down so margin + fee never exceeds available cash.
+      margin = round2(margin / 1.02);
+      fee = round2(margin * 0.02);
+    }
+    if (margin < 1) { toast("NOT ENOUGH CASH TO OPEN", "bad"); return; }
+    run.cash = round2(run.cash - margin - fee);
+    if (fee > 0) toast(`SPREAD FEE -$${fee.toFixed(2)}`, "bad");
+    run.position = { side, entry: currentPrice(), marginUsd: margin, leverage: selectedLeverage, openTickInLevel: run.tickInLevel, regimeAtOpen: regime.name };
+    toast(`${side} opened @ ${fmtPrice(run.position.entry)}`, side === "LONG" ? "good" : "bad");
+    render();
+  }
+
+  function unrealizedPnl() {
+    if (!run.position) return 0;
+    const p = run.position;
+    const priceNow = currentPrice();
+    const ret = p.side === "LONG" ? (priceNow / p.entry - 1) : (1 - priceNow / p.entry);
+    return p.marginUsd * p.leverage * ret;
+  }
+
+  // Cash plus whatever an open position is currently worth — the profit
+  // progress bar tracks this, not bare cash, so it doesn't lie to you while
+  // you're holding a winning (or losing) position.
+  function totalEquity() {
+    if (!run.position) return run.cash;
+    return run.cash + run.position.marginUsd + unrealizedPnl();
+  }
+
+  function applyRelicsToWinPnl(pnl, holdTicks) {
+    let out = pnl;
+    if (run.relics.includes("momentum")) out *= (1 + Math.min(run.streak, 10) * 0.05);
+    if (run.relics.includes("diamond") && holdTicks >= 10) out *= 1.25;
+    if (run.relics.includes("contrarian")) {
+      const p = run.position;
+      const contrarianWin = (p.side === "SHORT" && p.regimeAtOpen === "uptrend") || (p.side === "LONG" && p.regimeAtOpen === "downtrend");
+      if (contrarianWin) out *= 1.5;
+    }
+    if (run.relics.includes("scalper") && holdTicks <= 5) out *= 1.3;
+    const dayNow = Math.min(run.daysThisLevel, Math.floor(run.tickInLevel / TICKS_PER_DAY) + 1);
+    if (run.relics.includes("daybreak") && dayNow === 1) out *= 1.25;
+    if (run.relics.includes("nightowl") && dayNow === run.daysThisLevel) out *= 1.4;
+    if (run.relics.includes("voljunkie") && run.position.regimeAtOpen === "volatile") out *= 1.4;
+    if (run.relics.includes("coinflip")) {
+      const roll = Math.random();
+      if (roll < 0.3) out *= 2;
+      else if (roll < 0.4) out = 0;
+    }
+    return out;
+  }
+
+  function closePosition(liquidated) {
+    if (!run || !run.position) return;
+    const p = run.position;
+    const holdTicks = run.tickInLevel - p.openTickInLevel;
+    let pnl = unrealizedPnl();
+
+    if (liquidated) {
+      let capPct = run.relics.includes("highroller") ? 1.2 : 1.0;
+      if (run.relics.includes("shock")) capPct = Math.min(capPct, 0.6);
+      if (run.relics.includes("insurance") && !run.usedInsurance) {
+        capPct = Math.min(capPct, 0.3);
+        run.usedInsurance = true;
+        toast("INSURANCE PAID OUT", "gold");
+      }
+      pnl = -p.marginUsd * capPct;
+      run.liquidatedThisDay = true;
+    } else {
+      pnl = Math.max(pnl, -p.marginUsd * (run.relics.includes("highroller") ? 1.2 : 1.0));
+      if (pnl > 0) pnl = applyRelicsToWinPnl(pnl, holdTicks);
+    }
+
+    run.cash = round2(Math.max(0, run.cash + p.marginUsd + pnl));
+    run.peakCash = Math.max(run.peakCash, run.cash);
+
+    if (pnl > 0) {
+      run.streak++;
+      const m = run.mission;
+      if (m && !m.done) {
+        if (m.id === "streak3" && run.streak >= 3) completeMission();
+        else if (m.id === "shortwin" && p.side === "SHORT") completeMission();
+        else if (m.id === "longwin" && p.side === "LONG") completeMission();
+        else if (m.id === "hold15" && holdTicks >= 15) completeMission();
+        else if (m.id === "quick5" && holdTicks <= 5) completeMission();
+      }
+      toast(`${liquidated ? "SHOCK ABSORBED" : "CLOSED"} +$${pnl.toFixed(2)}`, "good");
+    } else {
+      run.streak = 0;
+      toast(liquidated ? `LIQUIDATED -$${Math.abs(pnl).toFixed(2)}` : `CLOSED -$${Math.abs(pnl).toFixed(2)}`, "bad");
+    }
+    run.position = null;
+    render();
+  }
+
+  function checkLiquidation() {
+    if (!run.position) return;
+    const pnl = unrealizedPnl();
+    const liqFrac = (run.modifier && run.modifier.id === "margincall") ? 0.8 : 1.0;
+    if (pnl <= -run.position.marginUsd * liqFrac) closePosition(true);
+  }
+
+  // ================= level / shop / bust flow =================
+  function endLevel() {
+    if (run.position) closePosition(false);
+    if (run.mission && run.mission.done) {
+      const bonus = round2(run.levelStartCash * 0.10);
+      run.cash = round2(run.cash + bonus);
+      run.peakCash = Math.max(run.peakCash, run.cash);
+      toast(`MISSION REWARD +$${bonus.toFixed(2)}`, "gold");
+    }
+    if (run.cash >= run.quota) {
+      if (run.relics.includes("compound")) run.cash = round2(run.cash * 1.03);
+      if (meta.metaUpgrades.extraCash > 0) run.cash += meta.metaUpgrades.extraCash * 50;
+      run.phase = "shop";
+      openShop();
+    } else {
+      run.phase = "bust";
+      openBust("Missed the profit target.");
+    }
+    render();
+  }
+
+  function openShop() {
+    document.getElementById("shop-next-round").textContent = run.level + 1;
+    const pool = RELICS.filter(r => !run.relics.includes(r.id));
+    const offers = [];
+    const poolCopy = [...pool];
+    for (let i = 0; i < 3 && poolCopy.length; i++) {
+      const idx = Math.floor(Math.random() * poolCopy.length);
+      offers.push(poolCopy.splice(idx, 1)[0]);
+    }
+    const cardsEl = document.getElementById("relic-cards");
+    cardsEl.innerHTML = offers.map(r => `<div class="relic-card" data-id="${r.id}">
+      <div class="name">${r.name}</div><div class="desc">${r.desc}</div>
+    </div>`).join("") || `<div class="empty-note">No new relics available — nice collection!</div>`;
+    cardsEl.querySelectorAll(".relic-card").forEach(card => {
+      card.addEventListener("click", () => pickRelic(card.dataset.id));
+    });
+    document.getElementById("shop-overlay").classList.add("show");
+  }
+  function pickRelic(id) {
+    run.relics.push(id);
+    toast(`Relic acquired: ${relicById(id).name}`, "gold");
+    document.getElementById("shop-overlay").classList.remove("show");
+    advanceToNextLevel();
+  }
+  document.getElementById("skip-relic").addEventListener("click", () => {
+    const bonus = round2(run.cash * 0.05);
+    run.cash = round2(run.cash + bonus);
+    toast(`Skipped relic — +$${bonus.toFixed(2)}`, "gold");
+    document.getElementById("shop-overlay").classList.remove("show");
+    advanceToNextLevel();
+  });
+  document.getElementById("reroll-relics").addEventListener("click", () => {
+    const cost = round2(run.cash * 0.05);
+    run.cash = round2(Math.max(0, run.cash - cost));
+    toast(`REROLLED -$${cost.toFixed(2)}`, "bad");
+    openShop();
+    render();
+  });
+
+  // Level briefing (Balatro's blind-select moment): the market is seeded and
+  // paused; the player sees target, modifier, and mission before committing.
+  function openLevelBriefing() {
+    document.getElementById("briefing-level-title").textContent = "Level " + run.level;
+    document.getElementById("briefing-rank").textContent = deskRankForLevel(run.level) + " — " + ticker;
+    const target = run.quota - run.levelStartCash;
+    document.getElementById("briefing-target").textContent = `+${fmtUsd(target)} (+${Math.round(run.profitTargetPct * 100)}%)`;
+    document.getElementById("briefing-days").textContent = run.daysThisLevel;
+    const modBlock = document.getElementById("briefing-modifier");
+    if (run.modifier) {
+      modBlock.style.display = "block";
+      document.getElementById("briefing-modifier-name").textContent = "⚠ " + run.modifier.name;
+      document.getElementById("briefing-modifier-desc").textContent = run.modifier.desc;
+    } else {
+      modBlock.style.display = "none";
+    }
+    document.getElementById("briefing-mission-desc").textContent = run.mission.desc;
+    document.getElementById("briefing-overlay").classList.add("show");
+  }
+  document.getElementById("btn-begin-level").addEventListener("click", () => {
+    document.getElementById("briefing-overlay").classList.remove("show");
+    run.phase = "trading";
+    render();
+  });
+
+  function advanceToNextLevel() {
+    const nextLevel = run.level + 1;
+    meta.bestLevelReached = Math.max(meta.bestLevelReached, run.level);
+    persistMeta();
+    startLevel(nextLevel, run.cash);
+    render();
+  }
+
+  function openBust(reason) {
+    if (run.position) { run.position = null; }
+    const levelsCleared = run.level - 1;
+    const insightEarned = levelsCleared * 5 + Math.floor(run.peakCash / 100);
+    meta.insight += insightEarned;
+    meta.bestLevelReached = Math.max(meta.bestLevelReached, levelsCleared);
+    persistMeta();
+    document.getElementById("bust-reason").textContent = reason;
+    document.getElementById("bust-rounds").textContent = levelsCleared;
+    document.getElementById("bust-peak").textContent = fmtUsd(run.peakCash);
+    document.getElementById("bust-insight").textContent = "+" + insightEarned;
+    document.getElementById("bust-overlay").classList.add("show");
+    renderMeta();
+  }
+  document.getElementById("btn-new-run").addEventListener("click", () => {
+    document.getElementById("bust-overlay").classList.remove("show");
+    newRun();
+  });
+
+  // ================= meta upgrades =================
+  function buyMeta(item) {
+    const tier = meta.metaUpgrades[item.id];
+    if (tier >= item.maxTier) return;
+    const cost = item.cost(tier);
+    if (meta.insight < cost) return;
+    meta.insight -= cost;
+    meta.metaUpgrades[item.id]++;
+    persistMeta();
+    renderMeta();
+    toast(`Meta upgrade: ${item.name}`, "gold");
+  }
+  function renderMeta() {
+    document.getElementById("insight-balance").textContent = meta.insight + " insight";
+    const list = document.getElementById("meta-list");
+    list.innerHTML = META_ITEMS.map(item => {
+      const tier = meta.metaUpgrades[item.id];
+      const maxed = tier >= item.maxTier;
+      const cost = maxed ? null : item.cost(tier);
+      return `<div class="meta-row">
+        <div><div class="name">${item.name} <span style="color:var(--muted); font-weight:400;">(${tier}/${item.maxTier})</span></div>
+        <div class="desc">${item.desc(tier)}</div></div>
+        ${maxed ? `<span style="color:var(--phosphor); font-size:11px;">MAXED</span>` : `<button class="buy-btn" data-id="${item.id}" ${meta.insight < cost ? "disabled" : ""}>${cost}</button>`}
+      </div>`;
+    }).join("");
+    list.querySelectorAll(".buy-btn").forEach(btn => btn.addEventListener("click", () => buyMeta(META_ITEMS.find(i => i.id === btn.dataset.id))));
+    renderBriefing();
+  }
+
+  function renderBriefing() {
+    const briefing = document.getElementById("briefing-text");
+    if (!briefing) return;
+    const startCash = baseStartingCash();
+    const pct = profitPctForLevel(1);
+    const target = Math.round(startCash * pct);
+    briefing.innerHTML =
+      `<b style="color:var(--phosphor);">Level 1</b> — start with ${fmtUsd(startCash)}, ` +
+      `reach +${fmtUsd(target)} profit (+${Math.round(pct * 100)}%) within 3 trading days ` +
+      `(${TICKS_PER_LEVEL} ticks total).<br>` +
+      `Leverage capped at 2x — 5x unlocks at Level 3, 10x at Level 5.<br>` +
+      `Clear a level to pick 1 of 3 relic upgrades for the next one.`;
+  }
+
+  // ================= order ticket UI =================
+  document.querySelectorAll(".chip[data-size]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll(".chip[data-size]").forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+      selectedSizePct = parseFloat(btn.dataset.size);
+    });
+  });
+  function renderLeverageChips() {
+    document.getElementById("lev-cap-tag").textContent = "max " + levCap() + "x";
+    document.querySelectorAll(".chip[data-lev]").forEach(btn => {
+      const lev = parseInt(btn.dataset.lev, 10);
+      btn.disabled = lev > levCap();
+      if (btn.disabled && btn.classList.contains("active")) {
+        btn.classList.remove("active");
+        selectedLeverage = 1;
+        document.querySelector('.chip[data-lev="1"]').classList.add("active");
+      }
+      btn.onclick = () => {
+        if (btn.disabled) return;
+        document.querySelectorAll(".chip[data-lev]").forEach(b => b.classList.remove("active"));
+        btn.classList.add("active");
+        selectedLeverage = lev;
+      };
+    });
+  }
+  document.getElementById("btn-long").addEventListener("click", () => openPosition("LONG"));
+  document.getElementById("btn-short").addEventListener("click", () => openPosition("SHORT"));
+  document.getElementById("btn-close").addEventListener("click", () => closePosition(false));
+  document.getElementById("btn-end-day").addEventListener("click", endDay);
+
+  // ================= toasts =================
+  function toast(msg, kind) {
+    const el = document.createElement("div");
+    el.className = "toast" + (kind === "bad" ? " bad" : kind === "gold" ? " gold" : "");
+    el.textContent = msg;
+    document.getElementById("toast-stack").appendChild(el);
+    setTimeout(() => el.remove(), 2600);
+  }
+
+  // ================= formatting =================
+  function fmtPrice(p) { return p.toFixed(2); }
+  function fmtUsd(n) { const s = n < 0 ? "-" : ""; n = Math.abs(n); return s + "$" + n.toFixed(2); }
+  function round2(n) { return Math.round(n * 100) / 100; }
+
+  // ================= chart rendering =================
+  const canvas = document.getElementById("chart");
+  const ctx = canvas.getContext("2d");
+  const tooltip = document.getElementById("chart-tooltip");
+
+  function resizeCanvas() {
+    const wrap = document.getElementById("chart-wrap");
+    const dpr = window.devicePixelRatio || 1;
+    const w = wrap.clientWidth - 16, h = 340;
+    canvas.style.width = w + "px"; canvas.style.height = h + "px";
+    canvas.width = w * dpr; canvas.height = h * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  window.addEventListener("resize", resizeCanvas);
+
+  function drawChart() {
+    const w = canvas.clientWidth, h = canvas.clientHeight;
+    ctx.clearRect(0, 0, w, h);
+    const visible = candles.slice(-50);
+    const n = visible.length;
+    const candleW = w / n;
+    const bodyW = Math.max(2, candleW * 0.6);
+    let lo = Math.min(...visible.map(c => c.l)), hi = Math.max(...visible.map(c => c.h));
+    if (run.position) { lo = Math.min(lo, run.position.entry); hi = Math.max(hi, run.position.entry); }
+    const pad = (hi - lo) * 0.08 || 1;
+    lo -= pad; hi += pad;
+    const y = p => h - ((p - lo) / (hi - lo)) * h;
+
+    ctx.strokeStyle = "rgba(107,143,124,0.15)"; ctx.lineWidth = 1;
+    for (let i = 1; i < 4; i++) { const gy = (h / 4) * i; ctx.beginPath(); ctx.moveTo(0, gy); ctx.lineTo(w, gy); ctx.stroke(); }
+
+    visible.forEach((c, i) => {
+      const cx = i * candleW + candleW / 2;
+      const up = c.c >= c.o;
+      ctx.strokeStyle = up ? "#1fae5e" : "#b8351f"; ctx.fillStyle = up ? "#1fae5e" : "#b8351f"; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.moveTo(cx, y(c.h)); ctx.lineTo(cx, y(c.l)); ctx.stroke();
+      const bodyTop = y(Math.max(c.o, c.c));
+      const bodyH = Math.max(1.5, Math.abs(y(c.o) - y(c.c)));
+      ctx.fillRect(cx - bodyW / 2, bodyTop, bodyW, bodyH);
+    });
+
+    if (run.position) {
+      const entryY = y(run.position.entry);
+      ctx.setLineDash([5, 4]); ctx.strokeStyle = run.position.side === "LONG" ? "#1fae5e" : "#ff6b4a"; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.moveTo(0, entryY); ctx.lineTo(w, entryY); ctx.stroke();
+      const liqRet = run.position.side === "LONG" ? -1 / run.position.leverage : 1 / run.position.leverage;
+      const liqPrice = run.position.entry * (1 + liqRet);
+      if (liqPrice > lo && liqPrice < hi) {
+        const liqY = y(liqPrice);
+        ctx.setLineDash([2, 3]); ctx.strokeStyle = "#ff6b4a";
+        ctx.beginPath(); ctx.moveTo(0, liqY); ctx.lineTo(w, liqY); ctx.stroke();
+      }
+      ctx.setLineDash([]);
+      document.getElementById("entry-legend").style.display = "inline-flex";
+      document.getElementById("liq-legend").style.display = run.position.leverage > 1 ? "inline-flex" : "none";
+    } else {
+      document.getElementById("entry-legend").style.display = "none";
+      document.getElementById("liq-legend").style.display = "none";
+    }
+    canvas._chartMeta = { visible, candleW };
+  }
+  canvas.addEventListener("mousemove", (e) => {
+    const m = canvas._chartMeta; if (!m) return;
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const idx = Math.min(m.visible.length - 1, Math.max(0, Math.floor(x / m.candleW)));
+    const c = m.visible[idx]; if (!c) return;
+    tooltip.style.display = "block";
+    tooltip.style.left = Math.min(x + 12, canvas.clientWidth - 130) + "px";
+    tooltip.style.top = "8px";
+    tooltip.innerHTML = `O ${fmtPrice(c.o)}<br>H ${fmtPrice(c.h)}<br>L ${fmtPrice(c.l)}<br>C ${fmtPrice(c.c)}`;
+  });
+  canvas.addEventListener("mouseleave", () => { tooltip.style.display = "none"; });
+
+  // ================= HUD rendering =================
+  function renderRunBar() {
+    document.getElementById("level-num").textContent = run.level;
+    document.getElementById("desk-rank").textContent = deskRankForLevel(run.level);
+    const endBtn = document.getElementById("btn-end-day");
+    endBtn.disabled = !canEndDay();
+    const isLastDay = Math.floor(run.tickInLevel / TICKS_PER_DAY) >= run.daysThisLevel - 1;
+    endBtn.textContent = isLastDay ? "End Level ▸" : "End Day ▸";
+    const ticksLeft = run.ticksThisLevel - run.tickInLevel;
+    document.getElementById("ticks-left").textContent = ticksLeft + " ticks left";
+    const currentDay = Math.min(run.daysThisLevel, Math.floor(run.tickInLevel / TICKS_PER_DAY) + 1);
+    const dotsEl = document.getElementById("day-dots");
+    dotsEl.innerHTML = Array.from({ length: run.daysThisLevel }, (_, i) => {
+      const dayIdx = i + 1;
+      const cls = dayIdx < currentDay ? "filled" : dayIdx === currentDay ? "current" : "";
+      return `<span class="day-dot ${cls}"></span>`;
+    }).join("");
+
+    const modTag = document.getElementById("modifier-tag");
+    if (run.modifier) {
+      modTag.style.display = "inline-block";
+      modTag.textContent = "⚠ " + run.modifier.name;
+    } else {
+      modTag.style.display = "none";
+    }
+    const missionEl = document.getElementById("mission-line");
+    if (run.mission) {
+      missionEl.textContent = run.mission.done
+        ? `◆ MISSION COMPLETE: ${run.mission.name}`
+        : `◇ MISSION: ${run.mission.desc} (+10% cash)`;
+      missionEl.style.color = run.mission.done ? "var(--gold)" : "var(--muted)";
+    } else {
+      missionEl.textContent = "";
+    }
+
+    const equity = totalEquity();
+    const profitSoFar = equity - run.levelStartCash;
+    const profitTarget = run.quota - run.levelStartCash;
+    const pct = profitTarget > 0 ? Math.min(100, Math.max(0, (profitSoFar / profitTarget) * 100)) : 100;
+    const fill = document.getElementById("quota-fill");
+    fill.style.width = pct + "%";
+    fill.classList.toggle("over", equity >= run.quota);
+    document.getElementById("profit-progress").textContent =
+      `${profitSoFar >= 0 ? "+" : ""}${fmtUsd(profitSoFar)} / +${fmtUsd(profitTarget)} profit`;
+    document.getElementById("quota-pct").textContent = Math.floor(pct) + "%";
+  }
+  function renderTickerBar() {
+    document.getElementById("ticker-symbol").textContent = ticker;
+    const fogged = run && run.modifier && run.modifier.id === "fog";
+    document.getElementById("regime-tag").textContent = fogged ? "???" : regime.name;
+    const price = currentPrice();
+    const prev = candles.length > 1 ? candles[candles.length - 2].c : price;
+    const priceEl = document.getElementById("price-now");
+    priceEl.textContent = fmtPrice(price);
+    priceEl.className = "price-now " + (price >= prev ? "up" : "down");
+    const chg = ((price / prev - 1) * 100);
+    const chEl = document.getElementById("price-change");
+    chEl.textContent = (chg >= 0 ? "+" : "") + chg.toFixed(2) + "%";
+    chEl.style.color = chg >= 0 ? "var(--up)" : "var(--down-text)";
+  }
+  function renderPosition() {
+    const el = document.getElementById("position-readout");
+    const closeBtn = document.getElementById("btn-close"), longBtn = document.getElementById("btn-long"), shortBtn = document.getElementById("btn-short");
+    const tradingActive = run.phase === "trading";
+    if (!run.position) {
+      el.innerHTML = `<span class="none">No open position.</span>`;
+      closeBtn.disabled = true; longBtn.disabled = !tradingActive; shortBtn.disabled = !tradingActive;
+      return;
+    }
+    longBtn.disabled = true; shortBtn.disabled = true; closeBtn.disabled = !tradingActive;
+    const pnl = unrealizedPnl();
+    el.innerHTML = `${run.position.side} ${run.position.leverage}x · margin ${fmtUsd(run.position.marginUsd)} @ ${fmtPrice(run.position.entry)}` +
+      `<div class="pnl-line ${pnl >= 0 ? "pos" : "neg"}">${pnl >= 0 ? "+" : ""}${fmtUsd(pnl)} unrealized</div>`;
+  }
+  function renderStats() {
+    document.getElementById("stat-cash").textContent = fmtUsd(run.cash);
+    document.getElementById("stat-best-round").textContent = meta.bestLevelReached;
+  }
+  function renderRelics() {
+    const list = document.getElementById("relic-list");
+    if (!run.relics.length) { list.innerHTML = `<div class="empty-note">No relics yet — clear level 1 to pick one.</div>`; return; }
+    list.innerHTML = run.relics.map(id => {
+      const r = relicById(id);
+      return `<div class="relic-item"><div class="name">${r.name}</div><div class="desc">${r.desc}</div></div>`;
+    }).join("");
+  }
+
+  function render() {
+    resizeCanvas();
+    drawChart();
+    renderRunBar();
+    renderTickerBar();
+    renderPosition();
+    renderStats();
+    renderRelics();
+    renderLeverageChips();
+    renderMeta();
+  }
+
+  // ================= tick loop =================
+  setInterval(tick, 550);
+
+  // ================= boot =================
+  // No run exists until the player clicks Start — only meta progression
+  // (Insight, permanent upgrades) is visible/spendable before that.
+  document.body.classList.add("pre-game");
+  document.getElementById("btn-start-game").addEventListener("click", () => {
+    document.body.classList.remove("pre-game");
+    document.getElementById("start-overlay").classList.remove("show");
+    newRun();
+  });
+  renderMeta();
+})();
+</script>
