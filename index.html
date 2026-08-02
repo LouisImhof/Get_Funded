@@ -217,6 +217,13 @@
   }
   .relic-card:hover { border-color: var(--gold); }
   .relic-card .name { color: var(--gold); font-weight: 700; font-size: 12.5px; }
+  .relic-card.combo { border-color: var(--accent, #6c8bff); }
+  .relic-card.combo .name { color: #8fa8ff; }
+  .relic-card.combo:hover { border-color: #8fa8ff; }
+  .combo-tag {
+    font-size: 9.5px; letter-spacing: 1px; color: #8fa8ff; border: 1px solid #8fa8ff;
+    padding: 0 4px; margin-left: 6px; vertical-align: middle;
+  }
   .relic-card .desc { color: var(--muted); font-size: 11px; margin-top: 6px; line-height: 1.45; }
   .skip-link { margin-top: 16px; color: var(--muted); font-size: 11.5px; text-decoration: underline; cursor: pointer; background: none; border: none; font-family: inherit; }
   .bust-stats { display: flex; gap: 20px; margin: 14px 0; }
@@ -398,6 +405,14 @@
     { id: "voljunkie", name: "Volatility Junkie", desc: "Wins opened during a volatile regime pay +40%." },
     { id: "insurance", name: "Insurance Policy", desc: "First liquidation each level only costs 30% of margin." },
     { id: "interest", name: "Savings Account", desc: "Every End Day skip pays 2% interest on your cash." },
+    // --- combo relics: these scale off your OTHER relics, so what you own
+    // changes what the next pick is worth. This is where builds come from. ---
+    { id: "portfolio", name: "Portfolio Theory", combo: true, desc: "+8% profit for every other relic you own." },
+    { id: "amplifier", name: "Signal Amplifier", combo: true, desc: "Doubles the bonus of your Momentum Core, Scalper's Ring and Diamond Hands." },
+    { id: "specialist", name: "Specialist", combo: true, desc: "If you own 3 or fewer relics total, all wins pay +60%." },
+    { id: "conglomerate", name: "Conglomerate", combo: true, desc: "If you own 6 or more relics, wins pay +45%." },
+    { id: "leverageloop", name: "Leverage Loop", combo: true, desc: "+10% profit per leverage tier you're using (2x/5x/10x)." },
+    { id: "riskparity", name: "Risk Parity", combo: true, desc: "Wins pay +12% for each DIFFERENT relic that triggered on this trade." },
   ];
   const relicById = id => RELICS.find(r => r.id === id);
 
@@ -717,23 +732,56 @@
 
   function applyRelicsToWinPnl(pnl, holdTicks) {
     let out = pnl;
-    if (run.relics.includes("momentum")) out *= (1 + Math.min(run.streak, 10) * 0.05);
-    if (run.relics.includes("diamond") && holdTicks >= 10) out *= 1.25;
-    if (run.relics.includes("contrarian")) {
+    const has = id => run.relics.includes(id);
+    // Track which relics actually fired — Risk Parity pays off this count,
+    // and the trade log shows it so combos are legible instead of magic.
+    const fired = [];
+    const fire = (id, mult) => { out *= mult; fired.push(id); };
+
+    // Signal Amplifier doubles the *bonus* (not the payout) of three relics:
+    // a +25% bonus becomes +50%, never turning a bonus into a penalty.
+    const amp = has("amplifier");
+    const boost = m => amp ? 1 + (m - 1) * 2 : m;
+
+    if (has("momentum")) {
+      const m = 1 + Math.min(run.streak, 10) * 0.05;
+      if (m > 1) fire("momentum", boost(m));
+    }
+    if (has("diamond") && holdTicks >= 10) fire("diamond", boost(1.25));
+    if (has("contrarian")) {
       const p = run.position;
       const contrarianWin = (p.side === "SHORT" && p.regimeAtOpen === "uptrend") || (p.side === "LONG" && p.regimeAtOpen === "downtrend");
-      if (contrarianWin) out *= 1.5;
+      if (contrarianWin) fire("contrarian", 1.5);
     }
-    if (run.relics.includes("scalper") && holdTicks <= 5) out *= 1.3;
+    if (has("scalper") && holdTicks <= 5) fire("scalper", boost(1.3));
     const dayNow = Math.min(run.daysThisLevel, Math.floor(run.tickInLevel / TICKS_PER_DAY) + 1);
-    if (run.relics.includes("daybreak") && dayNow === 1) out *= 1.25;
-    if (run.relics.includes("nightowl") && dayNow === run.daysThisLevel) out *= 1.4;
-    if (run.relics.includes("voljunkie") && run.position.regimeAtOpen === "volatile") out *= 1.4;
-    if (run.relics.includes("coinflip")) {
+    if (has("daybreak") && dayNow === 1) fire("daybreak", 1.25);
+    if (has("nightowl") && dayNow === run.daysThisLevel) fire("nightowl", 1.4);
+    if (has("voljunkie") && run.position.regimeAtOpen === "volatile") fire("voljunkie", 1.4);
+
+    // ---- combo relics ----
+    if (has("portfolio")) {
+      const others = run.relics.length - 1;
+      if (others > 0) fire("portfolio", 1 + others * 0.08);
+    }
+    if (has("specialist") && run.relics.length <= 3) fire("specialist", 1.6);
+    if (has("conglomerate") && run.relics.length >= 6) fire("conglomerate", 1.45);
+    if (has("leverageloop")) {
+      const tier = LEV_TIERS.indexOf(run.position.leverage) + 1; // 0 when 1x
+      if (tier > 0) fire("leverageloop", 1 + tier * 0.10);
+    }
+    if (has("riskparity") && fired.length > 0) {
+      // Counts the relics that fired before it, so it rewards wide builds.
+      out *= 1 + fired.length * 0.12;
+      fired.push("riskparity");
+    }
+
+    if (has("coinflip")) {
       const roll = Math.random();
-      if (roll < 0.3) out *= 2;
+      if (roll < 0.3) { out *= 2; fired.push("coinflip"); }
       else if (roll < 0.4) out = 0;
     }
+    run.lastFiredRelics = fired;
     return out;
   }
 
@@ -777,6 +825,12 @@
       spawnFloat(`+$${pnl.toFixed(2)}`, "good", bigWin);
       screenFlash(bigWin ? "gold" : "good");
       if (run.streak >= 2) spawnFloat(`STREAK x${run.streak}`, "gold");
+      const fired = run.lastFiredRelics || [];
+      if (fired.length >= 2) {
+        const names = fired.map(id => relicById(id) ? relicById(id).name : id);
+        toast(`COMBO x${fired.length}: ${names.join(" + ")}`, "gold");
+        spawnFloat(`COMBO x${fired.length}`, "gold", fired.length >= 4);
+      }
     } else {
       run.streak = 0;
       toast(liquidated ? `LIQUIDATED -$${Math.abs(pnl).toFixed(2)}` : `CLOSED -$${Math.abs(pnl).toFixed(2)}`, "bad");
@@ -829,8 +883,8 @@
       offers.push(poolCopy.splice(idx, 1)[0]);
     }
     const cardsEl = document.getElementById("relic-cards");
-    cardsEl.innerHTML = offers.map(r => `<div class="relic-card" data-id="${r.id}">
-      <div class="name">${r.name}</div><div class="desc">${r.desc}</div>
+    cardsEl.innerHTML = offers.map(r => `<div class="relic-card${r.combo ? " combo" : ""}" data-id="${r.id}">
+      <div class="name">${r.name}${r.combo ? `<span class="combo-tag">COMBO</span>` : ""}</div><div class="desc">${r.desc}</div>
     </div>`).join("") || `<div class="empty-note">No new relics available — nice collection!</div>`;
     cardsEl.querySelectorAll(".relic-card").forEach(card => {
       card.addEventListener("click", () => pickRelic(card.dataset.id));
